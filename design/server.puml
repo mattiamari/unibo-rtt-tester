@@ -1,0 +1,12 @@
+@startuml server-states
+
+[*] --> Hello
+Hello ---> Measurement : valid hello message
+Hello --> [*] : invalid hello message
+
+Measurement --> [*] : invalid probe
+Measurement --> Bye : n_probes reached
+
+Bye --> [*]
+
+@enduml

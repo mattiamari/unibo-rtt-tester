@@ -1,0 +1,19 @@
+@startuml client-states
+
+[*] --> Hello
+
+Hello : entry / send Hello message
+
+Hello ---> Measurement : OK received
+Hello --> [*] : ERROR received
+
+Measurement --> Bye : n_probes echos received
+Measurement --> [*] : ERROR received
+
+Bye : entry / send Bye message
+Bye : exit / close connection
+
+Bye --> [*] : OK received
+Bye -up-> Bye : wait for response timed out
+
+@endumls

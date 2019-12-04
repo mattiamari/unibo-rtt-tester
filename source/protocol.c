@@ -4,7 +4,16 @@
 #include <stdio.h>
 #include <time.h>
 
+static int check_truncation(size_t max_size, size_t actual_size);
+
+const char *measure_types_strings[] = {
+    "NONE",
+    "rtt",
+    "thput"
+};
+
 const char *response_strings[] = {
+    "NONE",
     "200 OK - Ready",
     "200 OK - Closing",
     "404 ERROR - Invalid Hello message",
@@ -14,7 +23,7 @@ const char *response_strings[] = {
 const unsigned int default_msg_size_rtt[] = {1, 100, 200, 400, 800, 1000};
 const unsigned int default_msg_size_thput[] = {1 K, 2 K, 4 K, 16 K, 32 K};
 
-char response_is(char *res, enum response type) {
+char response_is(char *res, enum responses type) {
     return strcmp(res, response_strings[type]) == 0;
 }
 
@@ -23,7 +32,7 @@ char is_valid_hello(msg_hello *msg) {
         return 0;
     }
 
-    if (msg->measure_type == NULL) {
+    if (msg->measure_type == 0) {
         return 0;
     }
 
@@ -62,48 +71,33 @@ char is_valid_bye(msg_bye *msg) {
     return 1;
 }
 
-char hello_to_string(msg_hello *msg, char *dest, size_t *size) {
+int hello_to_string(msg_hello *msg, char *dest, size_t *size) {
     *size = snprintf(dest, MAX_SIZE_HELLO, "%c %s %u %lu %u\n",
         msg->protocol_phase,
-        msg->measure_type,
+        measure_types_strings[msg->measure_type],
         msg->n_probes,
         msg->msg_size,
         msg->server_delay);
     
-    if (*size >= MAX_SIZE_HELLO) {
-        fprintf(stderr, "Output was truncated. Increase DEST size to %lu bytes at least", *size);
-        return 0;
-    }
-
-    return 1;
+    return check_truncation(MAX_SIZE_HELLO, *size);
 }
 
-char probe_to_string(msg_probe *msg, char *dest, size_t *size) {
+int probe_to_string(msg_probe *msg, char *dest, size_t *size) {
     *size = snprintf(dest, MAX_SIZE_PROBE, "%c %u %s\n",
         msg->protocol_phase,
         msg->probe_seq_num,
         msg->payload);
     
-    if (*size >= MAX_SIZE_PROBE) {
-        fprintf(stderr, "Output was truncated. Increase DEST size to %lu bytes at least", *size);
-        return 0;
-    }
-
-    return 1;
+    return check_truncation(MAX_SIZE_PROBE, *size);
 }
 
-char bye_to_string(msg_bye *msg, char *dest, size_t *size) {
+int bye_to_string(msg_bye *msg, char *dest, size_t *size) {
     *size = snprintf(dest, MAX_SIZE_BYE, "%c\n", msg->protocol_phase);
 
-    if (*size >= MAX_SIZE_BYE) {
-        fprintf(stderr, "Output was truncated. Increase DEST size to %lu bytes at least", *size);
-        return 0;
-    }
-
-    return 1;
+    return check_truncation(MAX_SIZE_BYE, *size);
 }
 
-char hello_from_string(const char *str, msg_hello *dest) {
+int hello_from_string(const char *str, msg_hello *dest) {
     int scan_res;
     char measure_type[8];
 
@@ -118,18 +112,18 @@ char hello_from_string(const char *str, msg_hello *dest) {
         return 0;
     }
 
-    if (strcmp(measure_type, MEASURE_RTT) == 0) {
+    if (strcmp(measure_type, measure_types_strings[MEASURE_RTT]) == 0) {
         dest->measure_type = MEASURE_RTT;
-    } else if (strcmp(measure_type, MEASURE_THROUGHPUT) == 0) {
-        dest->measure_type = MEASURE_THROUGHPUT;
+    } else if (strcmp(measure_type, measure_types_strings[MEASURE_THPUT]) == 0) {
+        dest->measure_type = MEASURE_THPUT;
     } else {
-        dest->measure_type = NULL;
+        dest->measure_type = 0;
     }
 
     return 1;
 }
 
-char probe_from_string(const char *str, msg_probe *dest) {
+int probe_from_string(const char *str, msg_probe *dest) {
     int scan_res;
 
     scan_res = sscanf(str, " %c %u %s\n",
@@ -144,7 +138,7 @@ char probe_from_string(const char *str, msg_probe *dest) {
     return 1;
 }
 
-char bye_from_string(const char *str, msg_bye *dest) {
+int bye_from_string(const char *str, msg_bye *dest) {
     int scan_res;
 
     scan_res = sscanf(str, " %c\n", &(dest->protocol_phase));
@@ -166,4 +160,13 @@ char *new_payload(size_t size) {
     }
 
     return payload;
+}
+
+static int check_truncation(size_t max_size, size_t actual_size) {
+    if (actual_size >= max_size) {
+        fprintf(stderr, "Output was truncated. Increase DEST size to %lu bytes at least", actual_size);
+        return 0;
+    }
+
+    return 1;
 }

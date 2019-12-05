@@ -8,46 +8,58 @@
 #include <errno.h>
 #include <time.h>
 #include <signal.h>
+#include <strings.h>
+#include <string.h>
+#include <argp.h>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 
-#include <strings.h>
-#include <string.h>
+static error_t arg_parser(int key, char *arg, struct argp_state *state);
+static void parse_measure_type(const char *arg, struct client_config *config);
+static void parse_probe_num(const char *arg, struct client_config *config);
+static void parse_payload_size(const char *arg, struct client_config *config);
+static void parse_server_addr(const char *arg, struct client_config *config);
+static void parse_server_port(const char *arg, struct client_config *config);
+
+static char doc[] = "RTT and throughput tester";
+static char args_doc[] = "SERVER_ADDR PORT";
+
+static struct argp_option options[] = {
+    {"measure", 'm', "TYPE", 0, "Type of measure to perform (rtt | thput). Defaults to 'rtt'."},
+    {"n_probes", 'n', "NUM", 0, "Number of probes to send, Defaults to 20."},
+    {"size", 's', "BYTES", 0, "Size of the probe's payload."},
+    {0}
+};
+
+static struct argp argp = {options, arg_parser, args_doc, doc};
 
 static unsigned short current_state;
 static int sock;
 static char recv_buf[RECV_BUF_SIZE];
+static struct client_config config;
 static msg_hello hello_message;
 
+
+
 int main(int argc, char **argv) {
-    int port;
-    struct sockaddr_in server_addr;
     struct timeval timeout;
+    char addr_str[INET_ADDRSTRLEN];
 
-    if (argc < 3) {
-        print_usage();
-        return 1;
+    config.measure_type = MEASURE_RTT;
+    config.n_probes = 20;
+    config.payload_sizes = default_msg_size_rtt;
+    config.n_sizes = sizeof default_msg_size_rtt / sizeof default_msg_size_rtt[0];
+    config.server_delay = 0;
+    bzero(&(config.server_addr), sizeof(struct sockaddr_in));
+    config.server_addr.sin_family = AF_INET;
+
+    if (argp_parse(&argp, argc, argv, 0, 0, &config) != 0) {
+        fprintf(stderr, "Some error occurred while parsing arguments\n");
+        exit(1);
     }
-
-    port = strtol(argv[2], NULL, 10);
-
-    if (port < 1 || port > 65535) {
-        fprintf(stderr, "Invalid port");
-        return 1;
-    }
-
-    bzero(&server_addr, sizeof(server_addr));
-
-    if (inet_aton(argv[1], &(server_addr.sin_addr)) == 0) {
-        fprintf(stderr, "Invalid address");
-        return 1;
-    }
-
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
@@ -63,12 +75,13 @@ int main(int argc, char **argv) {
 
     signal(SIGTERM, handle_terminate);
 
-    if (connect(sock, &server_addr, sizeof(server_addr)) == -1) {
+    if (connect(sock, &(config.server_addr), sizeof(config.server_addr)) == -1) {
         perror("Cannot connect host");
         return errno;
     }
 
-    printf("Connected to %s on port %d\n", argv[1], port);
+    inet_ntop(AF_INET, &(config.server_addr.sin_addr), addr_str, INET_ADDRSTRLEN);
+    printf("Connected to %s on port %d\n", addr_str, config.server_addr.sin_port);
 
     current_state = STATE_HELLO;
 
@@ -90,10 +103,10 @@ void state_hello() {
     char msg_str[MAX_SIZE_HELLO];
 
     hello_message.protocol_phase = PHASE_HELLO;
-    hello_message.measure_type = MEASURE_RTT;
-    hello_message.n_probes = 20;
-    hello_message.msg_size = 10;
-    hello_message.server_delay = 0;
+    hello_message.measure_type = config.measure_type;
+    hello_message.n_probes = config.n_probes;
+    hello_message.msg_size = config.payload_sizes[0];
+    hello_message.server_delay = config.server_delay;
 
     if (!hello_to_string(&hello_message, msg_str, &msg_str_len)) {
         fprintf(stderr, "Cannot serialize Hello message");
@@ -190,11 +203,82 @@ void state_close() {
     exit(EXIT_SUCCESS);
 }
 
-void print_usage() {
-    printf("Usage: ./client SERVER_ADDR PORT\n");
-}
-
 void handle_terminate(int sig) {
     printf("Caught SIGINT. Closing.\n");
     close(sock);
+}
+
+static error_t arg_parser(int key, char *arg, struct argp_state *state) {
+    struct client_config *config = state->input;
+
+    switch (key) {
+        case 'm': parse_measure_type(arg, config); break; 
+        case 'n': parse_probe_num(arg, config); break;
+        case 's': parse_payload_size(arg, config); break;
+        
+        case ARGP_KEY_ARG:
+            if (state->arg_num >= 2) {
+                argp_usage(state);
+            }
+            switch (state->arg_num) {
+                case 0: parse_server_addr(arg, config); break;
+                case 1: parse_server_port(arg, config);
+            }
+            break;
+        
+        case ARGP_KEY_END:
+            if (state->arg_num < 2) {
+                argp_usage(state);
+            }
+    }
+
+    return 0;
+}
+
+static void parse_measure_type(const char *arg, struct client_config *config) {
+    if (strcmp("rtt", arg) == 0) {
+        config->measure_type = MEASURE_RTT;
+    } else if (strcmp("thput", arg) == 0) {
+        config->measure_type = MEASURE_THPUT;
+    } else {
+        fprintf(stderr, "Invalid measure type");
+        exit(1);
+    }
+}
+
+static void parse_probe_num(const char *arg, struct client_config *config) {
+    config->n_probes = atoi(arg);
+    if (config->n_probes < 1) {
+        fprintf(stderr, "Invalid n_probes");
+        exit(1);
+    }
+}
+
+static void parse_payload_size(const char *arg, struct client_config *config) {
+    size_t *payload_size = malloc(sizeof(size_t));
+    *payload_size = atol(arg);
+
+    if (*payload_size < 1 || *payload_size > 32 K) {
+        fprintf(stderr, "Invalid payload size");
+        exit(1);
+    }
+
+    config->payload_sizes = payload_size;
+    config->n_sizes = 1;
+}
+
+static void parse_server_addr(const char *arg, struct client_config *config) {
+    if (inet_aton(arg, &(config->server_addr.sin_addr)) == 0) {
+        fprintf(stderr, "Invalid address");
+        exit(1);
+    }
+}
+
+static void parse_server_port(const char *arg, struct client_config *config) {
+    config->server_addr.sin_port = htons(atoi(arg));
+
+    if (config->server_addr.sin_port < 1 || config->server_addr.sin_port > 65535) {
+        fprintf(stderr, "Invalid port");
+        exit(1);
+    }
 }

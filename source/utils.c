@@ -4,10 +4,10 @@
 #include <errno.h>
 #include <string.h>
 
-void print_recv(char *msg) {
+void print_recv(const char *msg) {
     printf("<< %s\n", msg);
 }
 
-void print_send(char *msg) {
+void print_send(const char *msg) {
     printf(">> %s\n", msg);
 }

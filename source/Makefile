@@ -1,14 +1,18 @@
 .PHONY: all clean
 
 CC = gcc
-CFLAGS = -Wall -Werror -Wpedantic -std=c99 -ggdb
+CFLAGS = -Werror -Wall -Wpedantic -Wextra -std=c99
 
+all: CFLAGS += -O3
 all: client server
 
-client: client.h client.c utils.o protocol.o
+debug: CFLAGS += -ggdb
+debug: client server
+
+client: client.c utils.o protocol.o
 	$(CC) $(CFLAGS) -o $@ client.c utils.o protocol.o
 
-server: server.h server.c utils.o protocol.o
+server: server.c utils.o protocol.o
 	$(CC) $(CFLAGS) -o $@ server.c utils.o protocol.o
 
 utils.o: utils.h utils.c

@@ -10,8 +10,10 @@
 
 /**
  * Expected items to be parsed by scanf when reading a serialized Probe.
+ * This will be one less than the number of the struct's elements because
+ * we don't bother reading the payload.
  */
-#define EXPECTED_ITEMS_PROBE 3
+#define EXPECTED_ITEMS_PROBE 2
 
 /**
  * Expected items to be parsed by scanf when reading a serialized Bye.
@@ -55,6 +57,16 @@
 #define PHASE_BYE 'b'
 
 /**
+ * Default payload sizes for RTT measure mode
+ */
+extern size_t default_payload_size_rtt[6];
+
+/**
+ * Default payload sizes for throughput measure mode
+ */
+extern size_t default_payload_size_thput[5];
+
+/**
  * Types of measures that can be performed.
  * The indexes match the ones in measure_types_strings[]
  */
@@ -73,6 +85,11 @@ enum responses {
     RESP_INVALID_HELLO,
     RESP_INVALID_PROBE
 };
+
+/**
+ * Actual response strings
+ */
+extern const char *response_strings[];
 
 /**
  * Hello message
@@ -113,9 +130,9 @@ char is_valid_hello(msg_hello *msg);
 
 /**
  * Check if the provided Probe message is valid.
- * Sequence number is checked against LAST_SEQ
+ * Sequence number is checked against EXPECTED_SEQ
  */
-char is_valid_probe(msg_probe *msg, unsigned int last_seq);
+char is_valid_probe(msg_probe *msg, unsigned int expected_seq);
 
 /**
  * Check if the provided Bye message is valid
@@ -146,7 +163,8 @@ int bye_to_string(msg_bye *msg, char *dest, size_t *size);
 int hello_from_string(const char *str, msg_hello *dest);
 
 /**
- * Deserialize input string to its corresponding Probe struct
+ * Deserialize input string to its corresponding Probe struct.
+ * Note that we don't bother reading the payload.
  */
 int probe_from_string(const char *str, msg_probe *dest);
 

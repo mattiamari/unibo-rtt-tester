@@ -1,117 +1,246 @@
-#include "server.h"
-
 #include "utils.h"
+#include "protocol.h"
 
-#include <stdio.h>
 #include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
+#include <stdio.h>
+#include <argp.h>
 #include <errno.h>
-#include <string.h>
-#include <strings.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <signal.h>
+#include <strings.h>
+#include <string.h>
+#include <unistd.h>
 
-#define RECV_BUF_SIZE 1024
+#define RECV_BUF_SIZE 33*1024
 #define MAX_CONNECTIONS 16
 
-static int sock;
+enum server_states {
+    STATE_HELLO = 1,
+    STATE_MEASURE,
+    STATE_BYE,
+    STATE_CLOSE
+};
+
+struct server_config {
+    int port;
+};
+
+static void state_hello();
+static void state_measure();
+static void state_bye();
+static void state_close();
+
+static void handle_terminate(int sig);
+static error_t arg_parser(int key, char *arg, struct argp_state *state);
+
+static char doc[] = "RTT and throughput tester. Server software.";
+static char args_doc[] = "PORT";
+static struct argp_option options[] = {{0}};
+static struct argp argp = {options, arg_parser, args_doc, doc, 0, 0, 0};
+static struct server_config config;
+
+static void parse_server_port(const char *arg, struct server_config *config);
+
+
+
+static int listen_sock;
+static int client_sock;
+static char recv_buf[RECV_BUF_SIZE];
+static enum server_states current_state;
+static msg_hello hello_message;
 
 int main(int argc, char **argv) {
-    int bind_res;
-    int port;
-    struct sockaddr_in addr;
-    ssize_t recv_size;
-    char recv_buf[RECV_BUF_SIZE];
+    struct sockaddr_in listen_addr;
 
-    if (argc < 2) {
-        print_usage();
-        return 1;
+    config.port = 0;
+
+    if (argp_parse(&argp, argc, argv, 0, 0, &config) != 0) {
+        fprintf(stderr, "Some error occurred while parsing arguments\n");
+        exit(1);
     }
 
-    catch_sigterm();
+    signal(SIGINT, handle_terminate);
 
-    port = strtol(argv[1], NULL, 10);
+    bzero(&listen_addr, sizeof(struct sockaddr_in));
+    listen_addr.sin_family = AF_INET;
+    listen_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    listen_addr.sin_port = htons(config.port);
 
-    if (port < 1 || port > 65535) {
-        fprintf(stderr, "Invalid port");
-        return 1;
-    }
+    listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-
-    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if (sock == -1) {
+    if (listen_sock == -1) {
         perror("Cannot create socket");
         return errno;
     }
 
-    bind_res = bind(sock, (const struct sockaddr *)&addr, sizeof(addr));
-
-    if (bind_res == -1) {
+    if (bind(listen_sock, (const struct sockaddr *)&listen_addr, sizeof(listen_addr)) == -1) {
         perror("Cannot bind socket");
         return errno;
     }
 
-    if (listen(sock, MAX_CONNECTIONS)) {
+    if (listen(listen_sock, MAX_CONNECTIONS)) {
         perror("Cannot listen");
         return errno;
     }
 
-    printf("Listening on port %d\n", port);
+    printf("Listening on port %d\n", config.port);
+
+    current_state = STATE_HELLO;
 
     while (1) {
-        struct sockaddr_in client_addr;
-        socklen_t client_addr_len = sizeof(client_addr);
-        char addr_str[INET_ADDRSTRLEN];
-        int conn = accept(sock, &client_addr, &client_addr_len);
-
-        inet_ntop(AF_INET, &(client_addr.sin_addr), addr_str, INET_ADDRSTRLEN);
-
-        printf("Client connected: %s on port %d\n", addr_str, client_addr.sin_port);
-
-        while (1) {
-            bzero(recv_buf, RECV_BUF_SIZE);
-            recv_size = recv(conn, recv_buf, RECV_BUF_SIZE, 0);
-
-            if (recv_size == 0) {
-                break;
-            }
-
-            if (recv_size == -1) {
-                perror("Receive error");
-                return errno;
-            }
-
-            printf("RECV: %s\n", recv_buf);
+        switch (current_state) {
+            case STATE_HELLO  : state_hello(); break;
+            case STATE_MEASURE: state_measure(); break;
+            case STATE_BYE    : state_bye(); break;
+            case STATE_CLOSE  : state_close();
         }
+    }
+    
+    return 0;
+}
+
+static void state_hello() {
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len;
+    char addr_str[INET_ADDRSTRLEN];
+    ssize_t recv_size;
+    const char *response;
+    
+    bzero(&recv_buf, RECV_BUF_SIZE);
+
+    printf("Waiting connections\n");
+    client_sock = accept(listen_sock, (struct sockaddr *)&client_addr, &client_addr_len);
+    
+    inet_ntop(AF_INET, &(client_addr.sin_addr), addr_str, INET_ADDRSTRLEN);
+    printf("Client connected: %s on port %d\n", addr_str, client_addr.sin_port);
+
+    recv_size = recv(client_sock, recv_buf, RECV_BUF_SIZE, 0);
+    
+    if (recv_size == -1) {
+        perror("Receive error");
+        current_state = STATE_CLOSE;
+        return;
+    }
+
+    print_recv(recv_buf);
+
+    if (!hello_from_string(recv_buf, &hello_message)
+        || !is_valid_hello(&hello_message)
+    ) {
+        response = response_strings[RESP_INVALID_HELLO];
+        print_send(response);
+        send(client_sock, response, strlen(response) + 1, 0);
+    }
+
+    response = response_strings[RESP_READY];
+    print_send(response);
+    send(client_sock, response, strlen(response) + 1, 0);
+
+    current_state = STATE_MEASURE;
+}
+
+static void state_measure() {
+    unsigned int expected_seq = 1;
+    ssize_t recv_size;
+    msg_probe probe;
+    const char *response;
+
+    while (expected_seq < hello_message.n_probes) {
+        recv_size = recv(client_sock, recv_buf, RECV_BUF_SIZE, 0);
+
+        if (recv_size == -1) {
+            perror("Receive error");
+            current_state = STATE_CLOSE;
+            return;
+        }
+
+        print_recv(recv_buf);
+
+        if (!probe_from_string(recv_buf, &probe)
+            || !is_valid_probe(&probe, expected_seq)
+        ) {
+            fprintf(stderr, "Received invalid probe\n");
+            response = response_strings[RESP_INVALID_PROBE];
+            print_send(response);
+            send(client_sock, response, strlen(response) + 1, 0);
+            current_state = STATE_CLOSE;
+            return;
+        }
+
+        printf("Received probe seq %d\n", probe.probe_seq_num);
+        send(client_sock, recv_buf, recv_size, 0);
+    }
+
+    current_state = STATE_BYE;
+}
+
+static void state_bye() {
+    msg_bye msg;
+    const char *response;
+
+    if (recv(client_sock, recv_buf, RECV_BUF_SIZE, 0) == -1) {
+        perror("Receive error");
+        current_state = STATE_CLOSE;
+        return;
+    }
+
+    print_recv(recv_buf);
+
+    if (!bye_from_string(recv_buf, &msg) || !is_valid_bye(&msg)) {
+        fprintf(stderr, "Received invalid Bye message\n");
+        current_state = STATE_CLOSE;
+        return;
+    }
+
+    response = response_strings[RESP_CLOSING];
+    print_send(response);
+    send(client_sock, response, strlen(response) + 1, 0);
+
+    current_state = STATE_CLOSE;
+}
+
+static void state_close() {
+    printf("Closing client connection\n");
+    close(client_sock);
+    current_state = STATE_HELLO;
+}
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+static void handle_terminate(int sig) {
+    printf("Interrupt caught. Exiting.\n");
+    close(listen_sock);
+    close(client_sock);
+    exit(0);
+}
+#pragma GCC diagnostic pop
+
+static error_t arg_parser(int key, char *arg, struct argp_state *state) {
+    struct server_config *config = state->input;
+
+    switch (key) {
+        case ARGP_KEY_ARG:
+            if (state->arg_num >= 1) {
+                argp_usage(state);
+            }
+            parse_server_port(arg, config);
+            break;
+        
+        case ARGP_KEY_END:
+            if (state->arg_num < 1) {
+                argp_usage(state);
+            }
     }
 
     return 0;
 }
 
-void print_usage() {
-    printf("Usage: ./server PORT\n");
-}
+static void parse_server_port(const char *arg, struct server_config *config) {
+    config->port = atoi(arg);
 
-void catch_sigterm() {
-    static struct sigaction sig_act;
-
-    memset(&sig_act, 0, sizeof(sig_act));
-    sig_act.sa_sigaction = handle_sigterm;
-    sig_act.sa_flags = SA_SIGINFO;
-
-    sigaction(SIGTERM, &sig_act, NULL);
-    sigaction(SIGINT, &sig_act, NULL);
-}
-
-void handle_sigterm(int signum, siginfo_t *info, void *ptr) {
-    printf("Closing socket\n");
-    close(sock);
+    if (config->port < 1 || config->port > 65535) {
+        fprintf(stderr, "Invalid port");
+        exit(1);
+    }
 }

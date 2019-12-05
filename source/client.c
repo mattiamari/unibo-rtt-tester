@@ -1,4 +1,4 @@
-#include "client.h"
+#define _GNU_SOURCE
 
 #include "utils.h"
 #include "protocol.h"
@@ -17,6 +17,48 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
+#define SEND_BUF_SIZE 1024
+#define RECV_BUF_SIZE 33 * 1024
+#define SOCK_TIMEOUT_SEC 5
+
+enum client_states {
+    STATE_HELLO = 1,
+    STATE_MEASURE,
+    STATE_BYE,
+    STATE_WAIT_BYE_RESP,
+    STATE_CLOSE
+};
+
+struct client_config {
+    struct sockaddr_in server_addr;
+    enum measure_types measure_type;
+    int n_probes;
+    size_t *payload_sizes;
+    int n_sizes;
+    unsigned int server_delay;
+};
+
+static char doc[] = "RTT and throughput tester. Client software.";
+static char args_doc[] = "SERVER_ADDR PORT";
+
+static struct argp_option options[] = {
+    {"measure", 'm', "TYPE", 0, "Type of measure to perform (rtt | thput). Defaults to 'rtt'.", 1},
+    {"n-probes", 'n', "NUM", 0, "Number of probes to send, Defaults to 20.", 1},
+    {"size", 's', "BYTES", 0, "Size of the probe's payload.", 1},
+    {"server-delay", 'd', "MS", 0, "Server artificial delay in milliseconds.", 1},
+    {0}
+};
+
+
+
+static void state_hello();
+static void state_measure();
+static void state_bye();
+static void state_wait_bye_resp();
+static void state_close();
+
+static void handle_terminate(int sig);
+
 static error_t arg_parser(int key, char *arg, struct argp_state *state);
 static void parse_measure_type(const char *arg, struct client_config *config);
 static void parse_probe_num(const char *arg, struct client_config *config);
@@ -24,25 +66,14 @@ static void parse_payload_size(const char *arg, struct client_config *config);
 static void parse_server_addr(const char *arg, struct client_config *config);
 static void parse_server_port(const char *arg, struct client_config *config);
 
-static char doc[] = "RTT and throughput tester";
-static char args_doc[] = "SERVER_ADDR PORT";
 
-static struct argp_option options[] = {
-    {"measure", 'm', "TYPE", 0, "Type of measure to perform (rtt | thput). Defaults to 'rtt'."},
-    {"n_probes", 'n', "NUM", 0, "Number of probes to send, Defaults to 20."},
-    {"size", 's', "BYTES", 0, "Size of the probe's payload."},
-    {0}
-};
 
-static struct argp argp = {options, arg_parser, args_doc, doc};
-
+static struct argp argp = {options, arg_parser, args_doc, doc, 0, 0, 0};
 static unsigned short current_state;
 static int sock;
 static char recv_buf[RECV_BUF_SIZE];
 static struct client_config config;
 static msg_hello hello_message;
-
-
 
 int main(int argc, char **argv) {
     struct timeval timeout;
@@ -50,8 +81,8 @@ int main(int argc, char **argv) {
 
     config.measure_type = MEASURE_RTT;
     config.n_probes = 20;
-    config.payload_sizes = default_msg_size_rtt;
-    config.n_sizes = sizeof default_msg_size_rtt / sizeof default_msg_size_rtt[0];
+    config.payload_sizes = default_payload_size_rtt;
+    config.n_sizes = sizeof default_payload_size_rtt / sizeof default_payload_size_rtt[0];
     config.server_delay = 0;
     bzero(&(config.server_addr), sizeof(struct sockaddr_in));
     config.server_addr.sin_family = AF_INET;
@@ -73,7 +104,7 @@ int main(int argc, char **argv) {
     timeout.tv_sec = SOCK_TIMEOUT_SEC;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 
-    signal(SIGTERM, handle_terminate);
+    signal(SIGINT, handle_terminate);
 
     if (connect(sock, &(config.server_addr), sizeof(config.server_addr)) == -1) {
         perror("Cannot connect host");
@@ -87,18 +118,18 @@ int main(int argc, char **argv) {
 
     while(1) {
         switch (current_state) {
-            case STATE_HELLO: state_hello(); break;
-            case STATE_MEASURE: state_measure(); break;
-            case STATE_BYE: state_bye(); break;
+            case STATE_HELLO        : state_hello(); break;
+            case STATE_MEASURE      : state_measure(); break;
+            case STATE_BYE          : state_bye(); break;
             case STATE_WAIT_BYE_RESP: state_wait_bye_resp(); break;
-            case STATE_CLOSE: state_close();
+            case STATE_CLOSE        : state_close();
         }
     }
 
     return 0;
 }
 
-void state_hello() {
+static void state_hello() {
     size_t msg_str_len;
     char msg_str[MAX_SIZE_HELLO];
 
@@ -118,17 +149,24 @@ void state_hello() {
     print_send(msg_str);
     send(sock, msg_str, msg_str_len, 0);
 
-    recv(sock, recv_buf, RECV_BUF_SIZE, 0);
+    if (recv(sock, recv_buf, RECV_BUF_SIZE, 0) == -1) {
+        perror("Error occurred while waiting for Hello response");
+        current_state = STATE_CLOSE;
+        return;
+    }
+
     print_recv(recv_buf);
 
-    if (response_is(recv_buf, RESP_READY)) {
-        current_state = STATE_MEASURE;
-    } else {
-        current_state = STATE_MEASURE;
+    if (!response_is(recv_buf, RESP_READY)) {
+        fprintf(stderr, "Invalid response");
+        current_state = STATE_CLOSE;
+        return;
     }
+
+    current_state = STATE_MEASURE;
 }
 
-void state_measure() {
+static void state_measure() {
     char *payload;
     msg_probe probe;
     char probe_str[MAX_SIZE_PROBE];
@@ -140,7 +178,7 @@ void state_measure() {
     probe.protocol_phase = PHASE_MEASURE;
     probe.payload = payload;
 
-    for (int i = 1; i <= hello_message.n_probes; i++) {
+    for (unsigned int i = 1; i <= hello_message.n_probes; i++) {
         probe.probe_seq_num = i;
 
         if (!probe_to_string(&probe, probe_str, &probe_str_len)) {
@@ -157,7 +195,7 @@ void state_measure() {
     current_state = STATE_BYE;
 }
 
-void state_bye() {
+static void state_bye() {
     msg_bye bye;
     char bye_str[MAX_SIZE_BYE];
     size_t bye_str_len;
@@ -173,40 +211,40 @@ void state_bye() {
     current_state = STATE_WAIT_BYE_RESP;
 }
 
-void state_wait_bye_resp() {
-    int recv_res;
-
+static void state_wait_bye_resp() {
     printf("Waiting bye response\n");
 
-    recv_res = recv(sock, recv_buf, RECV_BUF_SIZE, 0);
-
-    if (recv_res == -1) {
-        perror("Receive error");
-        current_state = STATE_CLOSE;
-        return;
+    if (recv(sock, recv_buf, RECV_BUF_SIZE, 0) == -1) {
+        if (errno == ETIMEDOUT) {
+            printf(".");
+        } else {
+            perror("Receive error");
+            current_state = STATE_CLOSE;
+            return;
+        }
     }
 
-    if (recv_res > 0) {
-        print_recv(recv_buf);
-    } else if (recv_res == 0) {
-        printf(".");
-    }
+    print_recv(recv_buf);
 
     if (response_is(recv_buf, RESP_CLOSING)) {
         current_state = STATE_CLOSE;
     }
 }
 
-void state_close() {
+static void state_close() {
     printf("Closing\n");
     close(sock);
     exit(EXIT_SUCCESS);
 }
 
-void handle_terminate(int sig) {
-    printf("Caught SIGINT. Closing.\n");
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+static void handle_terminate(int sig) {
+    printf("Interrupt caught. Exiting.\n");
     close(sock);
+    exit(EXIT_SUCCESS);
 }
+#pragma GCC diagnostic pop
 
 static error_t arg_parser(int key, char *arg, struct argp_state *state) {
     struct client_config *config = state->input;
@@ -275,10 +313,12 @@ static void parse_server_addr(const char *arg, struct client_config *config) {
 }
 
 static void parse_server_port(const char *arg, struct client_config *config) {
-    config->server_addr.sin_port = htons(atoi(arg));
+    int port = atoi(arg);
 
-    if (config->server_addr.sin_port < 1 || config->server_addr.sin_port > 65535) {
+    if (port < 1 || port > 65535) {
         fprintf(stderr, "Invalid port");
         exit(1);
     }
+
+    config->server_addr.sin_port = htons(port);
 }

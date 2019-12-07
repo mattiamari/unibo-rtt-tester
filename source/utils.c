@@ -49,3 +49,7 @@ int recv_until(int fd, char *recv_buf, size_t recv_size, size_t *recv_idx, char 
     // temp_buf is full and message is not complete
     return -2;
 }
+
+unsigned long get_microseconds(struct timeval *tv) {
+    return 1000000 * (*tv).tv_sec + (*tv).tv_usec;
+}

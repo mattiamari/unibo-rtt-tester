@@ -2,6 +2,8 @@
 #define UTILS_H
 
 #include <stdlib.h>
+#include <time.h>
+
 void print_recv(const char *msg);
 void print_send(const char *msg);
 
@@ -12,5 +14,7 @@ int recv_until(int fd,
                char *temp_buf,
                size_t temp_size,
                char sep);
+
+unsigned long get_microseconds(struct timeval *tv)
 
 #endif

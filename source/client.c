@@ -45,7 +45,7 @@ static struct argp_option options[] = {
     {"measure", 'm', "TYPE", 0, "Type of measure to perform (rtt | thput). Defaults to 'rtt'.", 1},
     {"n-probes", 'n', "NUM", 0, "Number of probes to send, Defaults to 20.", 1},
     {"size", 's', "BYTES", 0, "Size of the probe's payload.", 1},
-    {"server-delay", 'd', "MS", 0, "Server artificial delay in milliseconds.", 1},
+    {"server-delay", 'd', "MS", 0, "Server artificial delay in milliseconds. Defaults to 0.", 1},
     {0}
 };
 
@@ -65,6 +65,7 @@ static void parse_probe_num(const char *arg, struct client_config *config);
 static void parse_payload_size(const char *arg, struct client_config *config);
 static void parse_server_addr(const char *arg, struct client_config *config);
 static void parse_server_port(const char *arg, struct client_config *config);
+static void parse_server_delay(const char *arg, struct client_config *config);
 
 
 
@@ -174,6 +175,9 @@ static void state_measure() {
     char probe_buf[RECV_BUF_SIZE];
     ssize_t echoed_probe_size;
     size_t recv_idx = 0;
+    struct timeval time_before, time_after;
+    unsigned long rtt_sum = 0, rtt_min = ULONG_MAX, rtt_max = 0;
+    unsigned long curr_rtt;
 
     printf("Starting measure\n");
 
@@ -190,16 +194,19 @@ static void state_measure() {
             current_state = STATE_CLOSE;
             return;
         }
-        
+
         #ifdef DEBUG
         print_send(probe_str);
         #endif
 
         send(sock, probe_str, probe_str_len, 0);
-        printf("Sent probe seq %d / %d (%lu bytes)\n", probe.probe_seq_num, hello_message.n_probes, probe_str_len);
+        gettimeofday(&time_before, NULL);
+        printf("Sent probe seq %d / %d (%lu bytes) ... ", probe.probe_seq_num, hello_message.n_probes, probe_str_len);
+        fflush(stdout);
 
         // Wait and check echoed probe
         echoed_probe_size = recv_until(sock, recv_buf, RECV_BUF_SIZE, &recv_idx, probe_buf, RECV_BUF_SIZE, '\n');
+        gettimeofday(&time_after, NULL);
 
         if (echoed_probe_size == -1) {
             perror("Receive error");
@@ -227,7 +234,15 @@ static void state_measure() {
             current_state = STATE_CLOSE;
             return;
         }
+
+        curr_rtt = get_diff_ms(&time_before, &time_after);
+        rtt_sum += curr_rtt;
+        rtt_min = ulmin(rtt_min, curr_rtt);
+        rtt_max = ulmax(rtt_max, curr_rtt);
+        printf("RTT = %ld ms\n", curr_rtt);
     }
+
+    printf("\nRTT min / max / avg = %ld / %ld / %ld ms\n", rtt_min, rtt_max, rtt_sum / hello_message.n_probes);
 
     free(payload);
     current_state = STATE_BYE;
@@ -288,10 +303,11 @@ static error_t arg_parser(int key, char *arg, struct argp_state *state) {
     struct client_config *config = state->input;
 
     switch (key) {
-        case 'm': parse_measure_type(arg, config); break; 
+        case 'm': parse_measure_type(arg, config); break;
         case 'n': parse_probe_num(arg, config); break;
         case 's': parse_payload_size(arg, config); break;
-        
+        case 'd': parse_server_delay(arg, config); break;
+
         case ARGP_KEY_ARG:
             if (state->arg_num >= 2) {
                 argp_usage(state);
@@ -301,7 +317,7 @@ static error_t arg_parser(int key, char *arg, struct argp_state *state) {
                 case 1: parse_server_port(arg, config);
             }
             break;
-        
+
         case ARGP_KEY_END:
             if (state->arg_num < 2) {
                 argp_usage(state);
@@ -359,4 +375,15 @@ static void parse_server_port(const char *arg, struct client_config *config) {
     }
 
     config->server_addr.sin_port = htons(port);
+}
+
+static void parse_server_delay(const char *arg, struct client_config *config) {
+    int delay = atoi(arg);
+
+    if (delay < 0) {
+        fprintf(stderr, "Invalid server delay");
+        exit(1);
+    }
+
+    config->server_delay = delay;
 }

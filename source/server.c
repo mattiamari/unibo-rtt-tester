@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 199309L
+
 #include "utils.h"
 #include "protocol.h"
 
@@ -12,6 +14,7 @@
 #include <strings.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #define RECV_BUF_SIZE 33*1024
 #define MAX_CONNECTIONS 16
@@ -97,7 +100,7 @@ int main(int argc, char **argv) {
             case STATE_CLOSE  : state_close();
         }
     }
-    
+
     return 0;
 }
 
@@ -107,17 +110,17 @@ static void state_hello() {
     char addr_str[INET_ADDRSTRLEN];
     ssize_t recv_size;
     const char *response;
-    
+
     bzero(&recv_buf, RECV_BUF_SIZE);
 
     printf("Waiting connections\n");
     client_sock = accept(listen_sock, (struct sockaddr *)&client_addr, &client_addr_len);
-    
+
     inet_ntop(AF_INET, &(client_addr.sin_addr), addr_str, INET_ADDRSTRLEN);
     printf("Client connected: %s on port %d\n", addr_str, client_addr.sin_port);
 
     recv_size = recv(client_sock, recv_buf, RECV_BUF_SIZE, 0);
-    
+
     if (recv_size == -1) {
         perror("Receive error");
         current_state = STATE_CLOSE;
@@ -148,6 +151,15 @@ static void state_measure() {
     ssize_t probe_size;
     msg_probe probe;
     const char *response;
+    struct timespec delay;
+
+    delay.tv_sec = 0;
+    delay.tv_nsec = 0;
+
+    if (hello_message.server_delay > 0) {
+        delay.tv_sec = 0;
+        delay.tv_nsec = 1000000 * hello_message.server_delay;
+    }
 
     while (expected_seq <= hello_message.n_probes) {
         probe_size = recv_until(client_sock, recv_buf, RECV_BUF_SIZE, &recv_idx, probe_buf, RECV_BUF_SIZE, '\n');
@@ -180,6 +192,11 @@ static void state_measure() {
         }
 
         printf("Received probe seq %d / %d (%lu bytes)\n", probe.probe_seq_num, hello_message.n_probes, probe_size);
+
+        if (delay.tv_nsec > 0) {
+            nanosleep(&delay, NULL);
+        }
+
         send(client_sock, probe_buf, probe_size, 0);
         expected_seq += 1;
     }
@@ -240,7 +257,7 @@ static error_t arg_parser(int key, char *arg, struct argp_state *state) {
             }
             parse_server_port(arg, config);
             break;
-        
+
         case ARGP_KEY_END:
             if (state->arg_num < 1) {
                 argp_usage(state);

@@ -32,7 +32,7 @@ int recv_until(int fd, char *recv_buf, size_t recv_size, size_t *recv_idx, char 
             temp_buf[temp_idx] = recv_buf[*recv_idx];
             temp_idx += 1;
         }
-        
+
         *recv_idx += 1;
 
         // separator found = message is complete
@@ -50,6 +50,15 @@ int recv_until(int fd, char *recv_buf, size_t recv_size, size_t *recv_idx, char 
     return -2;
 }
 
-unsigned long get_microseconds(struct timeval *tv) {
-    return 1000000 * (*tv).tv_sec + (*tv).tv_usec;
+unsigned long get_diff_ms(struct timeval *before, struct timeval *after) {
+    return 1000 * (after->tv_sec - before->tv_sec)
+    + 0.001 * (after->tv_usec - before->tv_usec);
+}
+
+unsigned long ulmin(unsigned long a, unsigned long b) {
+    return a < b ? a : b;
+}
+
+unsigned long ulmax(unsigned long a, unsigned long b) {
+    return a > b ? a : b;
 }

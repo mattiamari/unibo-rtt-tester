@@ -69,10 +69,10 @@ static void parse_server_port(const char *arg, struct client_config *config);
 
 
 static struct argp argp = {options, arg_parser, args_doc, doc, 0, 0, 0};
+static struct client_config config;
 static unsigned short current_state;
 static int sock;
 static char recv_buf[RECV_BUF_SIZE];
-static struct client_config config;
 static msg_hello hello_message;
 
 int main(int argc, char **argv) {
@@ -168,9 +168,12 @@ static void state_hello() {
 
 static void state_measure() {
     char *payload;
-    msg_probe probe;
+    msg_probe probe, echoed_probe;
     char probe_str[MAX_SIZE_PROBE];
     size_t probe_str_len;
+    char probe_buf[RECV_BUF_SIZE];
+    ssize_t echoed_probe_size;
+    size_t recv_idx = 0;
 
     printf("Starting measure\n");
 
@@ -188,7 +191,42 @@ static void state_measure() {
             return;
         }
         
+        #ifdef DEBUG
+        print_send(probe_str);
+        #endif
+
         send(sock, probe_str, probe_str_len, 0);
+        printf("Sent probe seq %d / %d (%lu bytes)\n", probe.probe_seq_num, hello_message.n_probes, probe_str_len);
+
+        // Wait and check echoed probe
+        echoed_probe_size = recv_until(sock, recv_buf, RECV_BUF_SIZE, &recv_idx, probe_buf, RECV_BUF_SIZE, '\n');
+
+        if (echoed_probe_size == -1) {
+            perror("Receive error");
+            free(payload);
+            current_state = STATE_CLOSE;
+            return;
+        }
+
+        if (echoed_probe_size == -2) {
+            fprintf(stderr, "Probe buffer too small\n");
+            free(payload);
+            current_state = STATE_CLOSE;
+            return;
+        }
+
+        #ifdef DEBUG
+        print_recv(probe_buf);
+        #endif
+
+        if (!probe_from_string(probe_buf, &echoed_probe)
+            || !is_valid_probe(&echoed_probe, probe.probe_seq_num)
+        ) {
+            fprintf(stderr, "Received invalid echoed probe\n");
+            free(payload);
+            current_state = STATE_CLOSE;
+            return;
+        }
     }
 
     free(payload);

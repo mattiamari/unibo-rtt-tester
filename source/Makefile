@@ -6,7 +6,7 @@ CFLAGS = -Werror -Wall -Wpedantic -Wextra -std=c99
 all: CFLAGS += -O3
 all: client server
 
-debug: CFLAGS += -ggdb
+debug: CFLAGS += -ggdb -DDEBUG
 debug: client server
 
 client: client.c utils.o protocol.o

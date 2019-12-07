@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <argp.h>
 #include <errno.h>
+#include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -142,22 +143,32 @@ static void state_hello() {
 
 static void state_measure() {
     unsigned int expected_seq = 1;
-    ssize_t recv_size;
+    size_t recv_idx = 0;
+    char probe_buf[RECV_BUF_SIZE];
+    ssize_t probe_size;
     msg_probe probe;
     const char *response;
 
-    while (expected_seq < hello_message.n_probes) {
-        recv_size = recv(client_sock, recv_buf, RECV_BUF_SIZE, 0);
+    while (expected_seq <= hello_message.n_probes) {
+        probe_size = recv_until(client_sock, recv_buf, RECV_BUF_SIZE, &recv_idx, probe_buf, RECV_BUF_SIZE, '\n');
 
-        if (recv_size == -1) {
+        if (probe_size == -1) {
             perror("Receive error");
             current_state = STATE_CLOSE;
             return;
         }
 
-        print_recv(recv_buf);
+        if (probe_size == -2) {
+            fprintf(stderr, "Probe buffer too small\n");
+            current_state = STATE_CLOSE;
+            return;
+        }
 
-        if (!probe_from_string(recv_buf, &probe)
+        #ifdef DEBUG
+        print_recv(probe_buf);
+        #endif
+
+        if (!probe_from_string(probe_buf, &probe)
             || !is_valid_probe(&probe, expected_seq)
         ) {
             fprintf(stderr, "Received invalid probe\n");
@@ -168,8 +179,9 @@ static void state_measure() {
             return;
         }
 
-        printf("Received probe seq %d\n", probe.probe_seq_num);
-        send(client_sock, recv_buf, recv_size, 0);
+        printf("Received probe seq %d / %d (%lu bytes)\n", probe.probe_seq_num, hello_message.n_probes, probe_size);
+        send(client_sock, probe_buf, probe_size, 0);
+        expected_seq += 1;
     }
 
     current_state = STATE_BYE;
@@ -178,6 +190,8 @@ static void state_measure() {
 static void state_bye() {
     msg_bye msg;
     const char *response;
+
+    bzero(recv_buf, RECV_BUF_SIZE);
 
     if (recv(client_sock, recv_buf, RECV_BUF_SIZE, 0) == -1) {
         perror("Receive error");

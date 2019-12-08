@@ -18,6 +18,7 @@
 
 #define RECV_BUF_SIZE 33*1024
 #define MAX_CONNECTIONS 16
+#define SOCK_TIMEOUT_SEC 5
 
 enum server_states {
     STATE_HELLO = 1,
@@ -105,6 +106,7 @@ int main(int argc, char **argv) {
 }
 
 static void state_hello() {
+    struct timeval timeout;
     struct sockaddr_in client_addr;
     socklen_t client_addr_len;
     char addr_str[INET_ADDRSTRLEN];
@@ -115,6 +117,15 @@ static void state_hello() {
 
     printf("Waiting connections\n");
     client_sock = accept(listen_sock, (struct sockaddr *)&client_addr, &client_addr_len);
+
+    // Timeout recv operations after SOCK_TIMEOUT_SEC seconds
+    timeout.tv_usec = 0;
+    timeout.tv_sec = SOCK_TIMEOUT_SEC;
+    if (setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) == -1) {
+        perror("Cannot set socket options: ");
+        current_state = STATE_CLOSE;
+        return;
+    }
 
     inet_ntop(AF_INET, &(client_addr.sin_addr), addr_str, INET_ADDRSTRLEN);
     printf("Client connected: %s on port %d\n", addr_str, client_addr.sin_port);

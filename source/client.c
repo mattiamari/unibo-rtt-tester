@@ -82,9 +82,8 @@ int main(int argc, char **argv) {
 
     config.measure_type = MEASURE_RTT;
     config.n_probes = 20;
-    config.payload_sizes = default_payload_size_rtt;
-    config.n_sizes = sizeof default_payload_size_rtt / sizeof default_payload_size_rtt[0];
     config.server_delay = 0;
+    config.n_sizes = 0;
     bzero(&(config.server_addr), sizeof(struct sockaddr_in));
     config.server_addr.sin_family = AF_INET;
 
@@ -330,10 +329,20 @@ static error_t arg_parser(int key, char *arg, struct argp_state *state) {
 static void parse_measure_type(const char *arg, struct client_config *config) {
     if (strcmp("rtt", arg) == 0) {
         config->measure_type = MEASURE_RTT;
+
+        if (config->n_sizes == 0) {
+            config->payload_sizes = default_payload_size_rtt;
+            config->n_sizes = sizeof default_payload_size_rtt / sizeof default_payload_size_rtt[0];
+        }
     } else if (strcmp("thput", arg) == 0) {
         config->measure_type = MEASURE_THPUT;
+
+        if (config->n_sizes == 0) {
+            config->payload_sizes = default_payload_size_thput;
+            config->n_sizes = sizeof default_payload_size_thput / sizeof default_payload_size_thput[0];
+        }
     } else {
-        fprintf(stderr, "Invalid measure type");
+        fprintf(stderr, "Invalid measure type\n");
         exit(1);
     }
 }

@@ -157,9 +157,16 @@ static void state_measure() {
     delay.tv_nsec = 0;
 
     if (hello_message.server_delay > 0) {
-        delay.tv_sec = 0;
-        delay.tv_nsec = 1000000 * hello_message.server_delay;
+        delay.tv_sec = hello_message.server_delay / 1000;
+
+        // the "+1" is needed because nanosleep will not sleep if tv_nsec == 0
+        // even when tv_sec is set to some value
+        delay.tv_nsec = 1000000 * (hello_message.server_delay % 1000) + 1;
     }
+
+    #ifdef DEBUG
+    printf("Artificial delay is %ld seconds and %ld nanoseconds\n", delay.tv_sec, delay.tv_nsec);
+    #endif
 
     while (expected_seq <= hello_message.n_probes) {
         probe_size = recv_until(client_sock, recv_buf, RECV_BUF_SIZE, &recv_idx, probe_buf, RECV_BUF_SIZE, '\n');

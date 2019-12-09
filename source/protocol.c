@@ -144,12 +144,14 @@ int bye_from_string(const char *str, msg_bye *dest) {
 }
 
 char *new_payload(size_t size) {
-    char *payload = calloc(size, sizeof(char));
+    char *payload = calloc(size + 1, sizeof(char));
 
     srand(time(NULL));
-    for (unsigned long i = 0; i < size; i++) {
-        payload[i] = 'A' + rand() % ('Z' - 'A');
+    for (size_t i = 0; i < size; i++) {
+        payload[i] = 'a' + rand() % ('z' - 'a');
     }
+
+    payload[size] = '\0';
 
     return payload;
 }

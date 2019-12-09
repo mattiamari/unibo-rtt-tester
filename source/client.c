@@ -184,11 +184,12 @@ static void state_measure() {
     char probe_str[MAX_SIZE_PROBE];
     size_t probe_str_len;
     char probe_buf[RECV_BUF_SIZE];
-    ssize_t echoed_probe_size;
+    ssize_t echoed_probe_size = 0;
     size_t recv_idx = 0;
     struct timeval time_before, time_after;
     unsigned long rtt_sum = 0, rtt_min = ULONG_MAX, rtt_max = 0;
     unsigned long curr_rtt;
+    double avg_rtt_sec, probe_kbits;
 
     printf("Starting measure. measure_type=%s n_probes=%d msg_size=%lu server_delay=%d\n",
         measure_types_strings[hello_message.measure_type], hello_message.n_probes,
@@ -255,7 +256,13 @@ static void state_measure() {
         printf("RTT = %ld ms\n", curr_rtt);
     }
 
-    printf("\nRTT min / max / avg = %ld / %ld / %ld ms\n", rtt_min, rtt_max, rtt_sum / hello_message.n_probes);
+    printf("\nRTT min / max / avg = %ld / %ld / %ld ms\n\n", rtt_min, rtt_max, rtt_sum / hello_message.n_probes);
+
+    if (hello_message.measure_type == MEASURE_THPUT) {
+        avg_rtt_sec = rtt_sum / hello_message.n_probes / 1000.0;
+        probe_kbits = echoed_probe_size * 8 / 1000.0;
+        printf("THROUGHPUT = %ld kbits/sec\n", (unsigned long)(probe_kbits / avg_rtt_sec));
+    }
 
     free(payload);
     current_state = STATE_BYE;

@@ -76,6 +76,11 @@ enum measure_types {
 };
 
 /**
+ * Actual measure type strings
+ */
+extern const char *measure_types_strings[];
+
+/**
  * Response messages.
  * The indexes match the ones in response_strings[]
  */

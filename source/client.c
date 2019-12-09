@@ -75,44 +75,25 @@ static unsigned short current_state;
 static int sock;
 static char recv_buf[RECV_BUF_SIZE];
 static msg_hello hello_message;
+static int curr_payload_size_idx;
 
 int main(int argc, char **argv) {
-    struct timeval timeout;
-    char addr_str[INET_ADDRSTRLEN];
-
-    config.measure_type = MEASURE_RTT;
     config.n_probes = 20;
     config.server_delay = 0;
-    config.n_sizes = 0;
+    config.measure_type = MEASURE_RTT;
+    config.payload_sizes = default_payload_size_rtt;
+    config.n_sizes = sizeof default_payload_size_rtt / sizeof default_payload_size_rtt[0];
+
     bzero(&(config.server_addr), sizeof(struct sockaddr_in));
     config.server_addr.sin_family = AF_INET;
+    curr_payload_size_idx = 0;
 
     if (argp_parse(&argp, argc, argv, 0, 0, &config) != 0) {
         fprintf(stderr, "Some error occurred while parsing arguments\n");
         exit(1);
     }
 
-    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if (sock == -1) {
-        perror("Cannot create socket");
-        return errno;
-    }
-
-    // Timeout recv operations after SOCK_TIMEOUT_SEC seconds
-    timeout.tv_usec = 0;
-    timeout.tv_sec = SOCK_TIMEOUT_SEC;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-
     signal(SIGINT, handle_terminate);
-
-    if (connect(sock, &(config.server_addr), sizeof(config.server_addr)) == -1) {
-        perror("Cannot connect host");
-        return errno;
-    }
-
-    inet_ntop(AF_INET, &(config.server_addr.sin_addr), addr_str, INET_ADDRSTRLEN);
-    printf("Connected to %s on port %d\n", addr_str, config.server_addr.sin_port);
 
     current_state = STATE_HELLO;
 
@@ -130,14 +111,45 @@ int main(int argc, char **argv) {
 }
 
 static void state_hello() {
+    struct timeval timeout;
+    char addr_str[INET_ADDRSTRLEN];
     size_t msg_str_len;
     char msg_str[MAX_SIZE_HELLO];
 
     hello_message.protocol_phase = PHASE_HELLO;
     hello_message.measure_type = config.measure_type;
     hello_message.n_probes = config.n_probes;
-    hello_message.msg_size = config.payload_sizes[0];
+    hello_message.msg_size = config.payload_sizes[curr_payload_size_idx];
     hello_message.server_delay = config.server_delay;
+
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    // Timeout recv operations after SOCK_TIMEOUT_SEC seconds
+    timeout.tv_usec = 0;
+    timeout.tv_sec = SOCK_TIMEOUT_SEC;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) == -1) {
+        perror("Cannot set socket options");
+        current_state = STATE_CLOSE;
+        return;
+    }
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) == -1) {
+        perror("Cannot set socket options");
+        current_state = STATE_CLOSE;
+        return;
+    }
+
+    if (sock == -1) {
+        perror("Cannot create socket");
+        exit(errno);
+    }
+
+    if (connect(sock, &(config.server_addr), sizeof(config.server_addr)) == -1) {
+        perror("Cannot connect host");
+        exit(errno);
+    }
+
+    inet_ntop(AF_INET, &(config.server_addr.sin_addr), addr_str, INET_ADDRSTRLEN);
+    printf("Connected to %s on port %d\n", addr_str, config.server_addr.sin_port);
 
     if (!hello_to_string(&hello_message, msg_str, &msg_str_len)) {
         fprintf(stderr, "Cannot serialize Hello message");
@@ -178,7 +190,9 @@ static void state_measure() {
     unsigned long rtt_sum = 0, rtt_min = ULONG_MAX, rtt_max = 0;
     unsigned long curr_rtt;
 
-    printf("Starting measure\n");
+    printf("Starting measure. measure_type=%s n_probes=%d msg_size=%lu server_delay=%d\n",
+        measure_types_strings[hello_message.measure_type], hello_message.n_probes,
+        hello_message.msg_size, hello_message.server_delay);
 
     payload = new_payload(hello_message.msg_size);
     probe.protocol_phase = PHASE_MEASURE;
@@ -278,9 +292,20 @@ static void state_wait_bye_resp() {
 
     print_recv(recv_buf);
 
-    if (response_is(recv_buf, RESP_CLOSING)) {
+    if (!response_is(recv_buf, RESP_CLOSING)) {
+        fprintf(stderr, "Invalid Bye response\n");
         current_state = STATE_CLOSE;
+        return;
     }
+
+    if (curr_payload_size_idx < config.n_sizes - 1) {
+        curr_payload_size_idx += 1;
+        current_state = STATE_HELLO;
+        close(sock);
+        return;
+    }
+
+    current_state = STATE_CLOSE;
 }
 
 static void state_close() {
@@ -329,18 +354,12 @@ static error_t arg_parser(int key, char *arg, struct argp_state *state) {
 static void parse_measure_type(const char *arg, struct client_config *config) {
     if (strcmp("rtt", arg) == 0) {
         config->measure_type = MEASURE_RTT;
-
-        if (config->n_sizes == 0) {
-            config->payload_sizes = default_payload_size_rtt;
-            config->n_sizes = sizeof default_payload_size_rtt / sizeof default_payload_size_rtt[0];
-        }
+        config->payload_sizes = default_payload_size_rtt;
+        config->n_sizes = sizeof default_payload_size_rtt / sizeof default_payload_size_rtt[0];
     } else if (strcmp("thput", arg) == 0) {
         config->measure_type = MEASURE_THPUT;
-
-        if (config->n_sizes == 0) {
-            config->payload_sizes = default_payload_size_thput;
-            config->n_sizes = sizeof default_payload_size_thput / sizeof default_payload_size_thput[0];
-        }
+        config->payload_sizes = default_payload_size_thput;
+        config->n_sizes = sizeof default_payload_size_thput / sizeof default_payload_size_thput[0];
     } else {
         fprintf(stderr, "Invalid measure type\n");
         exit(1);

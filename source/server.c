@@ -126,6 +126,11 @@ static void state_hello() {
         current_state = STATE_CLOSE;
         return;
     }
+    if (setsockopt(client_sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) == -1) {
+        perror("Cannot set socket options: ");
+        current_state = STATE_CLOSE;
+        return;
+    }
 
     inet_ntop(AF_INET, &(client_addr.sin_addr), addr_str, INET_ADDRSTRLEN);
     printf("Client connected: %s on port %d\n", addr_str, client_addr.sin_port);
@@ -146,10 +151,13 @@ static void state_hello() {
         response = response_strings[RESP_INVALID_HELLO];
         print_send(response);
         send(client_sock, response, strlen(response) + 1, 0);
+        current_state = STATE_CLOSE;
+        return;
     }
 
     response = response_strings[RESP_READY];
     print_send(response);
+    
     send(client_sock, response, strlen(response) + 1, 0);
 
     current_state = STATE_MEASURE;
@@ -209,13 +217,18 @@ static void state_measure() {
             return;
         }
 
-        printf("Received probe seq %d / %d (%lu bytes)\n", probe.probe_seq_num, hello_message.n_probes, probe_size);
+        printf("Received probe seq %d / %d (%lu bytes)\n",
+                probe.probe_seq_num, hello_message.n_probes, probe_size);
 
         if (delay.tv_nsec > 0) {
             nanosleep(&delay, NULL);
         }
 
-        send(client_sock, probe_buf, probe_size, 0);
+        if (send(client_sock, probe_buf, probe_size, 0) == -1) {
+            perror("Probe send error");
+            current_state = STATE_CLOSE;
+            return;
+        }
         expected_seq += 1;
     }
 

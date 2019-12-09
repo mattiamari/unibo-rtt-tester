@@ -36,6 +36,7 @@ struct client_config {
     size_t *payload_sizes;
     int n_sizes;
     unsigned int server_delay;
+    char quiet;
 };
 
 static char doc[] = "RTT and throughput tester. Client software.";
@@ -46,6 +47,7 @@ static struct argp_option options[] = {
     {"n-probes", 'n', "NUM", 0, "Number of probes to send, Defaults to 20.", 1},
     {"size", 's', "BYTES", 0, "Size of the probe's payload.", 1},
     {"server-delay", 'd', "MS", 0, "Server artificial delay in milliseconds. Defaults to 0.", 1},
+    {"quiet", 'q', 0, 0, "Print less info", 1},
     {0}
 };
 
@@ -83,6 +85,7 @@ int main(int argc, char **argv) {
     config.measure_type = MEASURE_RTT;
     config.payload_sizes = default_payload_size_rtt;
     config.n_sizes = sizeof default_payload_size_rtt / sizeof default_payload_size_rtt[0];
+    config.quiet = 0;
 
     bzero(&(config.server_addr), sizeof(struct sockaddr_in));
     config.server_addr.sin_family = AF_INET;
@@ -158,7 +161,7 @@ static void state_hello() {
     }
 
     printf("Sending hello message. (%lu bytes)\n", msg_str_len);
-    print_send(msg_str);
+    if (!config.quiet) print_send(msg_str);
     send(sock, msg_str, msg_str_len, 0);
 
     if (recv(sock, recv_buf, RECV_BUF_SIZE, 0) == -1) {
@@ -167,7 +170,7 @@ static void state_hello() {
         return;
     }
 
-    print_recv(recv_buf);
+    if (!config.quiet) print_recv(recv_buf);
 
     if (!response_is(recv_buf, RESP_READY)) {
         fprintf(stderr, "Invalid response");
@@ -215,8 +218,11 @@ static void state_measure() {
 
         send(sock, probe_str, probe_str_len, 0);
         gettimeofday(&time_before, NULL);
-        printf("Sent probe seq %d / %d (%lu bytes) ... ", probe.probe_seq_num, hello_message.n_probes, probe_str_len);
-        fflush(stdout);
+
+        if (!config.quiet) {
+            printf("Sent probe seq %d / %d (%lu bytes) ... ", probe.probe_seq_num, hello_message.n_probes, probe_str_len);
+            fflush(stdout);
+        }
 
         // Wait and check echoed probe
         echoed_probe_size = recv_until(sock, recv_buf, RECV_BUF_SIZE, &recv_idx, probe_buf, RECV_BUF_SIZE, '\n');
@@ -253,7 +259,8 @@ static void state_measure() {
         rtt_sum += curr_rtt;
         rtt_min = ulmin(rtt_min, curr_rtt);
         rtt_max = ulmax(rtt_max, curr_rtt);
-        printf("RTT = %ld ms\n", curr_rtt);
+
+        if (!config.quiet) printf("RTT = %ld ms\n", curr_rtt);
     }
 
     printf("\nRTT min / max / avg = %ld / %ld / %ld ms\n\n", rtt_min, rtt_max, rtt_sum / hello_message.n_probes);
@@ -338,6 +345,7 @@ static error_t arg_parser(int key, char *arg, struct argp_state *state) {
         case 'n': parse_probe_num(arg, config); break;
         case 's': parse_payload_size(arg, config); break;
         case 'd': parse_server_delay(arg, config); break;
+        case 'q': config->quiet = 1; break;
 
         case ARGP_KEY_ARG:
             if (state->arg_num >= 2) {

@@ -9,6 +9,9 @@ all: client server
 debug: CFLAGS += -ggdb -DDEBUG
 debug: client server
 
+static: CFLAGS += --static
+static: client server
+
 client: client.c utils.o protocol.o
 	$(CC) $(CFLAGS) -o $@ client.c utils.o protocol.o
 

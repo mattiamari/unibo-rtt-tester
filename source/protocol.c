@@ -79,7 +79,7 @@ int hello_to_string(msg_hello *msg, char *dest, size_t *size) {
 }
 
 int probe_to_string(msg_probe *msg, char *dest, size_t *size) {
-    *size = snprintf(dest, MAX_SIZE_PROBE, "%c %u %s\n",
+    *size = snprintf(dest, MAX_SIZE_PROBE, "%c %4u %s\n",
         msg->protocol_phase,
         msg->probe_seq_num,
         msg->payload);

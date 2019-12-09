@@ -16,6 +16,7 @@ void print_send(const char *msg) {
 
 int recv_until(int fd, char *recv_buf, size_t recv_size, size_t *recv_idx, char *temp_buf, size_t temp_size, char sep) {
     size_t temp_idx;
+    ssize_t recv_res;
 
     temp_idx = 0;
 
@@ -23,8 +24,17 @@ int recv_until(int fd, char *recv_buf, size_t recv_size, size_t *recv_idx, char 
         if (*recv_idx == 0) {
             bzero(recv_buf, recv_size);
 
-            if (recv(fd, recv_buf, recv_size, 0) == -1) {
+            recv_res = recv(fd, recv_buf, recv_size, 0);
+
+            if (recv_res == -1) {
                 return -1;
+            }
+
+            // Nothing was received, check if connection is still alive
+            if (recv_res == 0) {
+                if (send(fd, " ", 1, MSG_NOSIGNAL) == -1) {
+                    return -1;
+                }
             }
         }
 

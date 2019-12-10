@@ -65,6 +65,8 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     signal(SIGINT, handle_terminate);
 
     bzero(&listen_addr, sizeof(struct sockaddr_in));

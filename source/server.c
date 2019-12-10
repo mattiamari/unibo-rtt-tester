@@ -200,6 +200,8 @@ static void state_measure() {
 
         if (probe_size == -2) {
             fprintf(stderr, "Probe buffer too small\n");
+            response = response_strings[RESP_INVALID_PROBE];
+            send(client_sock, response, strlen(response) + 1, 0);
             current_state = STATE_CLOSE;
             return;
         }

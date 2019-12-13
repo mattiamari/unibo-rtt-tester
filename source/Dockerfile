@@ -6,7 +6,6 @@ RUN apt-get update \
 WORKDIR /var/build
 
 COPY . ./
-
 RUN make clean && make static
 
 FROM scratch

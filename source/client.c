@@ -11,6 +11,7 @@
 #include <strings.h>
 #include <string.h>
 #include <argp.h>
+#include <float.h>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -190,8 +191,7 @@ static void state_measure() {
     ssize_t echoed_probe_size = 0;
     size_t recv_idx = 0;
     struct timeval time_before, time_after;
-    unsigned long rtt_sum = 0, rtt_min = ULONG_MAX, rtt_max = 0;
-    unsigned long curr_rtt;
+    double curr_rtt, rtt_sum = 0, rtt_min = DBL_MAX, rtt_max = 0;
     double avg_rtt_sec, probe_kbits;
 
     printf("Starting measure. measure_type=%s n_probes=%d msg_size=%lu server_delay=%d\n",
@@ -257,18 +257,18 @@ static void state_measure() {
 
         curr_rtt = get_diff_ms(&time_before, &time_after);
         rtt_sum += curr_rtt;
-        rtt_min = ulmin(rtt_min, curr_rtt);
-        rtt_max = ulmax(rtt_max, curr_rtt);
+        rtt_min = double_min(rtt_min, curr_rtt);
+        rtt_max = double_max(rtt_max, curr_rtt);
 
-        if (!config.quiet) printf("RTT = %ld ms\n", curr_rtt);
+        if (!config.quiet) printf("RTT = %.6f ms\n", curr_rtt);
     }
 
-    printf("\nRTT min / max / avg = %ld / %ld / %ld ms\n\n", rtt_min, rtt_max, rtt_sum / hello_message.n_probes);
+    printf("\nRTT min / max / avg = %.6f / %.6f / %.6f ms\n\n", rtt_min, rtt_max, rtt_sum / hello_message.n_probes);
 
     if (hello_message.measure_type == MEASURE_THPUT) {
         avg_rtt_sec = rtt_sum / hello_message.n_probes / 1000.0;
         probe_kbits = echoed_probe_size * 8 / 1000.0;
-        printf("THROUGHPUT = %ld kbits/sec\n", (unsigned long)(probe_kbits / avg_rtt_sec));
+        printf("THROUGHPUT = %.3f kbits/sec\n", probe_kbits / avg_rtt_sec);
     }
 
     free(payload);
@@ -384,7 +384,7 @@ static void parse_measure_type(const char *arg, struct client_config *config) {
 static void parse_probe_num(const char *arg, struct client_config *config) {
     config->n_probes = atoi(arg);
     if (config->n_probes < 1) {
-        fprintf(stderr, "Invalid n_probes");
+        fprintf(stderr, "Invalid n_probes\n");
         exit(1);
     }
 }
@@ -394,7 +394,7 @@ static void parse_payload_size(const char *arg, struct client_config *config) {
     *payload_size = atol(arg);
 
     if (*payload_size < 1 || *payload_size > 32 K) {
-        fprintf(stderr, "Invalid payload size");
+        fprintf(stderr, "Invalid payload size\n");
         exit(1);
     }
 
@@ -404,7 +404,7 @@ static void parse_payload_size(const char *arg, struct client_config *config) {
 
 static void parse_server_addr(const char *arg, struct client_config *config) {
     if (inet_aton(arg, &(config->server_addr.sin_addr)) == 0) {
-        fprintf(stderr, "Invalid address");
+        fprintf(stderr, "Invalid address\n");
         exit(1);
     }
 }
@@ -413,7 +413,7 @@ static void parse_server_port(const char *arg, struct client_config *config) {
     int port = atoi(arg);
 
     if (port < 1 || port > 65535) {
-        fprintf(stderr, "Invalid port");
+        fprintf(stderr, "Invalid port\n");
         exit(1);
     }
 
@@ -424,7 +424,7 @@ static void parse_server_delay(const char *arg, struct client_config *config) {
     int delay = atoi(arg);
 
     if (delay < 0) {
-        fprintf(stderr, "Invalid server delay");
+        fprintf(stderr, "Invalid server delay\n");
         exit(1);
     }
 

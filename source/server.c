@@ -159,7 +159,6 @@ static void state_hello() {
 
     response = response_strings[RESP_READY];
     print_send(response);
-    
     send(client_sock, response, strlen(response) + 1, 0);
 
     current_state = STATE_MEASURE;
@@ -180,13 +179,11 @@ static void state_measure() {
     if (hello_message.server_delay > 0) {
         delay.tv_sec = hello_message.server_delay / 1000;
 
-        // the "+1" is needed because nanosleep will not sleep if tv_nsec == 0
-        // even when tv_sec is set to some value
-        delay.tv_nsec = 1000000 * (hello_message.server_delay % 1000) + 1;
+        delay.tv_nsec = 1000000 * (hello_message.server_delay % 1000);
     }
 
     #ifdef DEBUG
-    printf("Artificial delay is %ld seconds and %ld nanoseconds\n", delay.tv_sec, delay.tv_nsec);
+    printf("Fake network delay is %ld seconds and %ld nanoseconds\n", delay.tv_sec, delay.tv_nsec);
     #endif
 
     while (expected_seq <= hello_message.n_probes) {
@@ -201,6 +198,7 @@ static void state_measure() {
         if (probe_size == -2) {
             fprintf(stderr, "Probe buffer too small\n");
             response = response_strings[RESP_INVALID_PROBE];
+            print_send(response);
             send(client_sock, response, strlen(response) + 1, 0);
             current_state = STATE_CLOSE;
             return;
@@ -224,7 +222,7 @@ static void state_measure() {
         printf("Received probe seq %d / %d (%lu bytes)\n",
                 probe.probe_seq_num, hello_message.n_probes, probe_size);
 
-        if (delay.tv_nsec > 0) {
+        if (delay.tv_sec > 0 || delay.tv_nsec > 0) {
             nanosleep(&delay, NULL);
         }
 

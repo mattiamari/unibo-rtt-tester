@@ -60,15 +60,15 @@ int recv_until(int fd, char *recv_buf, size_t recv_size, size_t *recv_idx, char 
     return -2;
 }
 
-unsigned long get_diff_ms(struct timeval *before, struct timeval *after) {
+double get_diff_ms(struct timeval *before, struct timeval *after) {
     return 1000 * (after->tv_sec - before->tv_sec)
     + 0.001 * (after->tv_usec - before->tv_usec);
 }
 
-unsigned long ulmin(unsigned long a, unsigned long b) {
+double double_min(double a, double b) {
     return a < b ? a : b;
 }
 
-unsigned long ulmax(unsigned long a, unsigned long b) {
+double double_max(double a, double b) {
     return a > b ? a : b;
 }

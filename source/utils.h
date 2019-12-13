@@ -15,9 +15,9 @@ int recv_until(int fd,
                size_t temp_size,
                char sep);
 
-unsigned long get_diff_ms(struct timeval *before, struct timeval *after);
+double get_diff_ms(struct timeval *before, struct timeval *after);
 
-unsigned long ulmin(unsigned long a, unsigned long b);
-unsigned long ulmax(unsigned long a, unsigned long b);
+double double_min(double a, double b);
+double double_max(double a, double b);
 
 #endif

@@ -36,11 +36,11 @@ char is_valid_hello(msg_hello *msg) {
         return 0;
     }
 
-    if (msg->n_probes <= 0) {
+    if (msg->n_probes < 1) {
         return 0;
     }
 
-    if (msg->msg_size <= 0) {
+    if (msg->msg_size < 1) {
         return 0;
     }
 

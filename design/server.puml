@@ -2,11 +2,18 @@
 
 [*] --> Hello
 Hello ---> Measurement : valid hello message
-Hello --> [*] : invalid hello message
+Hello --> [*] : invalid hello message \n do / send ERROR
 
-Measurement --> [*] : invalid probe
+Hello : exit / send OK
+
+Measurement --> [*] : invalid probe \n do / send ERROR
 Measurement --> Bye : n_probes reached
 
+Measurement : do / echo probe back
+
 Bye --> [*]
+
+Bye : do / wait Bye message
+Bye : exit / send OK message
 
 @enduml

@@ -10,10 +10,14 @@ Hello --> [*] : ERROR received
 Measurement --> Bye : n_probes echos received
 Measurement --> [*] : ERROR received
 
+Measurement : exit / print RTT and/or throughput
+
+Bye --> WaitByeResponse
+
 Bye : entry / send Bye message
-Bye : exit / close connection
+WaitByeResponse : exit / close connection
 
-Bye --> [*] : OK received
-Bye -up-> Bye : wait for response timed out
+WaitByeResponse --> [*] : OK received
+WaitByeResponse -up-> WaitByeResponse : response timeout
 
-@endumls
+@enduml
